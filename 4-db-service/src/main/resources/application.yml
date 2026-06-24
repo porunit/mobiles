@@ -1,0 +1,37 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: ${OTEL_SERVICE_NAME:db-service}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:trading}
+    username: ${POSTGRES_USER:trading}
+    password: ${POSTGRES_PASSWORD:trading_dev_pass}
+  jpa:
+    hibernate:
+      ddl-auto: update        # iteration 1 — Flyway migrations come in iteration 2
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:app}
+    password: ${RABBITMQ_PASSWORD:app_dev_pass}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${OTEL_SERVICE_NAME:db-service}
