@@ -7,7 +7,7 @@ kernel-модуль (`.ko`) — шаг 2.
 символьным устройством `/dev/financial_quotes` (см. `[[linux-char-device]]`). Т.к.
 хост разработки — macOS, итерация 1 реализована как **user-space демон на C**: создаёт
 FIFO в общем томе и стримит котировки в формате **NDJSON (одна `QuoteTick` на строку)**.
-Тот же wire-контракт будет отдавать и kernel-модуль, поэтому `[[6-quotes-receiver]]`
+Тот же wire-контракт будет отдавать и kernel-модуль, поэтому `[6-quotes-receiver](../6-quotes-receiver/README.md)`
 не меняется при переходе на `.ko`.
 
 ## Контракт (NDJSON, одна котировка на строку)
@@ -48,4 +48,4 @@ JSON/CSV) · `sysfs_interface.c/.h` (управление) · `Makefile` (kbuild
 ## Сборка/запуск
 Только Linux-ядро. На macOS — в privileged-контейнере `driver-container` (Docker
 Desktop LinuxKit-VM). Device-node кладётся на named-volume `dev_financial_quotes`,
-который `[[6-quotes-receiver]]` монтирует `:ro`. См. `docs/ARCHITECTURE.md` §7.
+который `[6-quotes-receiver](../6-quotes-receiver/README.md)` монтирует `:ro`. См. `docs/ARCHITECTURE.md` §7.

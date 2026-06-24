@@ -9,7 +9,7 @@
 ## 1. Обзор
 
 Система имитирует экосистему брокера: данные о котировках поступают с «биржи»
-(эмулятор на уровне ядра Linux), проходят через конвейер обработки и доходят до
+(эмулятор на C: user-space-демон в итер. 1, модуль ядра Linux — шаг 2), проходят через конвейер обработки и доходят до
 мобильного терминала клиента; клиент совершает сделки купли/продажи, которые
 исполняются атомарно и сохраняются в БД.
 
@@ -40,7 +40,7 @@
 | `4-db-service` | Торговое ядро, работа с БД, консьюмер котировок | Kotlin, Spring Boot 3, JPA | 1 |
 | `5-load-imitator` | Имитатор 10k клиентов | Kotlin, корутины | 2 |
 | `6-quotes-receiver` | Мост `/dev` → RabbitMQ | Go | 1 |
-| `7-linux-driver` | Эмулятор биржи (char-device) | C, модуль ядра Linux | 1 |
+| `7-linux-driver` | Эмулятор биржи (NDJSON через FIFO; char-device — шаг 2) | C: user-space (итер. 1) → модуль ядра Linux | 1 |
 
 Инфраструктура: **RabbitMQ** (брокер) · **Redis** (кэш) · **PostgreSQL** (состояние) ·
 **ClickHouse** (аналитика, тики, логи/трейсы) · **OpenTelemetry Collector** →
@@ -76,10 +76,13 @@ Jaeger (трейсы) / Prometheus (метрики) / Grafana (панели).
 ## 5. Сквозные потоки данных
 
 ### 5.1 Котировка: биржа → клиент
-1. `7-linux-driver` — модуль ядра: random-walk fixed-point (×10⁶), 200 тиков/с на
-   инструмент, отдаёт JSON-массив `QuoteTick` через char-device `/dev/financial_quotes`
-   и управляется через sysfs `/sys/kernel/financial_quotes/`.
-2. `6-quotes-receiver` (Go) читает `/dev`, парсит, и **только публикует** в RabbitMQ:
+1. `7-linux-driver` — эмулятор биржи: random-walk fixed-point (×10⁶), 200 тиков/с на
+   инструмент. **Итерация 1** — user-space-демон на C (`userspace/quote_gen.c`): создаёт
+   FIFO на общем томе `dev_financial_quotes` и стримит **NDJSON** (одна `QuoteTick` на
+   строку). **Шаг 2** — модуль ядра с char-device `/dev/financial_quotes` и управлением
+   через sysfs `/sys/kernel/financial_quotes/`, отдающий тот же wire-контракт.
+2. `6-quotes-receiver` (Go) читает устройство (FIFO), парсит NDJSON, и **только
+   публикует** в RabbitMQ:
    exchange `quotes.topic`, routing key `quote.tick.<SYMBOL>`, с publisher-confirms.
 3. `4-db-service` — `QuoteTickListener` на очереди `quotes.consume.q` (ручной `ack`
    после обработки): трансформирует `QuoteTick → Quote` (join с `instruments`),
@@ -116,7 +119,11 @@ Jaeger (трейсы) / Prometheus (метрики) / Grafana (панели).
 ### RabbitMQ (брокер)
 Topology-as-code в `docker/rabbitmq/definitions.json`:
 - exchange `quotes.topic` (topic) → `quotes.consume.q` (TTL 10с, `drop-head`) +
-  `quotes.clickhouse.q` (без TTL — аналитика ловит всё); DLX `dlx.quotes`.
+  `quotes.clickhouse.q` (без TTL — аналитика ловит всё); DLX `dlx.quotes`. Очереди
+  `*.dlx.q` ограничены policy `dlx-bound` (max-length 50k, `drop-head`), чтобы DLX
+  не рос безгранично. В итер. 1 у `quotes.clickhouse.q` ещё нет консьюмера — db-service
+  (§5.1 шаг 3) пишет `quote_ticks` напрямую из `quotes.consume.q`; отдельный
+  analytics-worker для `quotes.clickhouse.q` — позже.
 - exchange `orders.topic` → `orders.clickhouse.q` (итер. 2); DLX `dlx.orders`.
 
 ### ClickHouse (аналитика)
@@ -130,25 +137,31 @@ OTel — таблицы `otel_logs`/`otel_traces` (создаёт коллект
 Единый `docker/docker-compose.yaml`. Инфраструктура запускается по умолчанию;
 прикладные сервисы — профиль `apps`, имитатор — профиль `imitator`.
 
-Порты: шлюз **8080** (единственный публичный для клиентов), DB-сервис 8081,
-go-receiver 8090, RabbitMQ 5672/15672, Redis 6379, PostgreSQL 5432, ClickHouse
-8123/9000, OTel 4317/4318/8889, Jaeger 16686, Prometheus 9090, Grafana 3000.
+Порты (в dev публикуются на loopback `127.0.0.1`, не на `0.0.0.0`): шлюз **8080**
+(единственный публичный для клиентов), DB-сервис 8081, go-receiver 8090,
+RabbitMQ 5672/15672, Redis 6379, PostgreSQL 5432, ClickHouse 8123/9000,
+OTel 4317/4318/8889, Jaeger 16686, Prometheus 9090, Grafana 3000.
 
 ### C-драйвер на macOS
-На macOS нет ядра Linux — Docker Desktop запускает всё в LinuxKit-VM, поэтому модуль
-грузится в ядро **этой VM**, а не в macOS. Механика: `driver/Dockerfile` собирает
-`financial_quotes.ko` в Linux-образе; контейнер `driver-container` (`privileged`,
-`cap_add: SYS_MODULE`) делает `insmod` и `mknod` device-node на named-volume
-`dev_financial_quotes` (bind-mount Linux-устройства на mac невозможен); `go-receiver`
-монтирует тот же volume `:ro`. Оба контейнера делят одно ядро VM. Fallback для
-CI/rootless — userspace-шим, пишущий те же кадры в тот же FIFO.
+**Итерация 1 (текущая).** `driver-container` — обычный (непривилегированный) контейнер,
+запускающий user-space-демон `quote_gen` (`7-linux-driver/Dockerfile`, статический бинарь).
+Он создаёт FIFO `financial_quotes` на named-volume `dev_financial_quotes` и стримит NDJSON;
+`go-receiver` монтирует тот же volume `:ro` и читает FIFO. Кросс-платформенно, без
+привилегий и без зависимости от ядра хоста.
+
+**Шаг 2 (реальный модуль ядра).** На macOS нет ядра Linux — Docker Desktop запускает всё
+в LinuxKit-VM, поэтому модуль грузится в ядро **этой VM**. Механика: Dockerfile собирает
+`financial_quotes.ko`; контейнер `driver-container` с `privileged`, `cap_add: [SYS_MODULE,
+MKNOD]` и mount `/lib/modules:ro` делает `insmod` и `mknod` char-device на том же
+named-volume (bind-mount Linux-устройства на mac невозможен). Оба контейнера делят одно
+ядро VM; wire-контракт (NDJSON) не меняется, поэтому `go-receiver` остаётся прежним.
 
 ## 8. Наблюдаемость
 
 Все сервисы → OTel Collector `:4317`. Трейсы → Jaeger (+ архив в ClickHouse), метрики
 → Prometheus (scrape коллектора `:8889`), логи → ClickHouse. Единая панель — Grafana
 с тремя источниками (Prometheus, ClickHouse, Jaeger). Трейс начинается на go-receiver
-(модуль ядра не умеет OTLP; его телеметрия — счётчики/dmesg). Заголовок контекста —
+(драйвер не эмитит OTLP; его телеметрия — логи/счётчики). Заголовок контекста —
 W3C `traceparent`.
 
 ## 9. Тестирование
@@ -183,7 +196,7 @@ W3C `traceparent`.
 | Бэкенд DB-сервиса | Spring Boot + JPA | как в эталоне (по согласованию) |
 | Брокер | RabbitMQ | как в эталоне; Redis — только кэш |
 | ClickHouse + OTel | внедряем полноценно | требование задания |
-| C-драйвер | реальный модуль ядра в privileged-контейнере | требование задания, macOS-ограничение |
+| C-драйвер | user-space NDJSON-эмулятор (FIFO) в итер. 1; реальный модуль ядра — шаг 2 | требование задания; user-space снимает зависимость от ядра хоста на старте, контракт не меняется |
 | Источник цен | реальный конвейер | исправление главной ошибки эталона |
 | Refresh-токены | итерация 2 | упрощение вертикали; access TTL 24ч |
 | Заказ → ClickHouse | прямой батч-JDBC (итер. 1) | проще; брокерный путь — итер. 2 |
