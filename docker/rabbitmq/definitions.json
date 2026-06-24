@@ -1,0 +1,66 @@
+{
+  "rabbit_version": "3.13.0",
+  "rabbitmq_version": "3.13.0",
+  "users": [
+    {
+      "name": "admin",
+      "password_hash": "kIpPIcsyxrXzWHmv3h8xPPMOXM12dMlzFIQJyaphj1O5Dd1O",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    },
+    {
+      "name": "app",
+      "password_hash": "kIpPIdNZeUNeN0sYJy9Jp1GhWQWK+juHPfwktiyrjER+oqZt",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "permissions": [
+    { "user": "admin", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" },
+    { "user": "app",   "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+  ],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": [],
+  "exchanges": [
+    { "name": "quotes.topic", "vhost": "/", "type": "topic",  "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "orders.topic", "vhost": "/", "type": "topic",  "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "dlx.quotes",   "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "dlx.orders",   "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    {
+      "name": "quotes.consume.q", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.quotes",
+        "x-message-ttl": 10000,
+        "x-max-length": 200000,
+        "x-overflow": "drop-head"
+      }
+    },
+    {
+      "name": "quotes.clickhouse.q", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.quotes",
+        "x-max-length": 1000000,
+        "x-overflow": "drop-head"
+      }
+    },
+    { "name": "quotes.dlx.q", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    {
+      "name": "orders.clickhouse.q", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "dlx.orders" }
+    },
+    { "name": "orders.dlx.q", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} }
+  ],
+  "bindings": [
+    { "source": "quotes.topic", "vhost": "/", "destination": "quotes.consume.q",    "destination_type": "queue", "routing_key": "quote.tick.#", "arguments": {} },
+    { "source": "quotes.topic", "vhost": "/", "destination": "quotes.clickhouse.q", "destination_type": "queue", "routing_key": "quote.tick.#", "arguments": {} },
+    { "source": "dlx.quotes",   "vhost": "/", "destination": "quotes.dlx.q",        "destination_type": "queue", "routing_key": "",            "arguments": {} },
+    { "source": "orders.topic", "vhost": "/", "destination": "orders.clickhouse.q", "destination_type": "queue", "routing_key": "order.#",     "arguments": {} },
+    { "source": "dlx.orders",   "vhost": "/", "destination": "orders.dlx.q",        "destination_type": "queue", "routing_key": "",            "arguments": {} }
+  ]
+}

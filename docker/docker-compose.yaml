@@ -1,0 +1,295 @@
+name: rmp-trading
+
+# ---------------------------------------------------------------------------
+# Default `docker compose up` starts the INFRASTRUCTURE (public images, no build).
+# Application services live under the `apps` profile; the load imitator under
+# `imitator`. They are added as each module is implemented.
+#   Infra only:   docker compose -f docker/docker-compose.yaml up -d
+#   With apps:    docker compose -f docker/docker-compose.yaml --profile apps up -d --build
+# ---------------------------------------------------------------------------
+
+networks:
+  backbone:
+    driver: bridge
+  observability:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  rabbitmq_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  dev_financial_quotes:   # shared /dev node between driver-container and go-receiver
+
+services:
+
+  # ======================= INFRASTRUCTURE (default) =======================
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rmp-rabbitmq
+    ports: ["5672:5672", "15672:15672"]
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backbone]
+
+  redis:
+    image: redis:7-alpine
+    container_name: rmp-redis
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "no"]
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backbone]
+
+  postgres:
+    image: postgres:16
+    container_name: rmp-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trading}
+      POSTGRES_USER: ${POSTGRES_USER:-trading}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trading_dev_pass}
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trading} -d ${POSTGRES_DB:-trading}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backbone]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: rmp-clickhouse
+    ports: ["8123:8123", "9000:9000"]
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-analytics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    networks: [backbone, observability]
+
+  # ======================= OBSERVABILITY (default) =======================
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    container_name: rmp-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
+    volumes:
+      - ./otel/config.yaml:/etc/otelcol/config.yaml:ro
+    ports: ["4317:4317", "4318:4318", "8889:8889"]
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      jaeger:     { condition: service_started }
+    networks: [backbone, observability]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: rmp-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686"]
+    networks: [observability]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: rmp-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports: ["9090:9090"]
+    networks: [backbone, observability]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: rmp-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASS:-admin}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus, jaeger, clickhouse]
+    networks: [observability]
+
+  # ======================= APPLICATION (profile: apps) =======================
+  # Code for these is added module by module. Build contexts already point at
+  # the right module dirs; until each Dockerfile exists, only run the infra.
+
+  driver-container:
+    # Iteration 1: user-space emulator streaming NDJSON quotes into a FIFO on the
+    # shared volume. The kernel-module variant (step 2) re-adds `privileged: true`,
+    # `cap_add: [SYS_MODULE, MKNOD]` and the `/lib/modules:/lib/modules:ro` mount.
+    build:
+      context: ../7-linux-driver
+      dockerfile: Dockerfile
+    container_name: rmp-driver
+    environment:
+      QUOTE_RATE_HZ: "200"
+      INSTRUMENT_SET: "SBER,GAZP,YNDX,LKOH,VTBR,AAPL,TSLA"
+      LOG_LEVEL: info
+    volumes:
+      - dev_financial_quotes:/shared-dev
+    healthcheck:
+      test: ["CMD-SHELL", "test -p /shared-dev/financial_quotes"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+    networks: [backbone]
+    profiles: [apps]
+
+  go-receiver:
+    build:
+      context: ../6-quotes-receiver
+      dockerfile: Dockerfile
+    container_name: rmp-go-receiver
+    depends_on:
+      driver-container: { condition: service_healthy }
+      rabbitmq:         { condition: service_healthy }
+    environment:
+      DEVICE_PATH: /dev-shared/financial_quotes
+      RABBITMQ_URL: amqp://${RABBITMQ_APP_USER:-app}:${RABBITMQ_APP_PASS:-app_dev_pass}@rabbitmq:5672/
+      QUOTES_EXCHANGE: quotes.topic
+      QUOTES_ROUTING_PREFIX: quote.tick
+      PUBLISHER_CONFIRMS: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: go-receiver
+    volumes:
+      - dev_financial_quotes:/dev-shared:ro
+    ports: ["8090:8090"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks: [backbone, observability]
+    profiles: [apps]
+
+  db-service:
+    build:
+      context: ../4-db-service
+      dockerfile: Dockerfile
+    container_name: rmp-db-service
+    depends_on:
+      postgres:   { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      rabbitmq:   { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    environment:
+      SERVER_PORT: "8081"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-trading}
+      POSTGRES_USER: ${POSTGRES_USER:-trading}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trading_dev_pass}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_APP_USER:-app}
+      RABBITMQ_PASSWORD: ${RABBITMQ_APP_PASS:-app_dev_pass}
+      RABBITMQ_QUOTES_QUEUE: quotes.consume.q
+      CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/analytics
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-rmp-trading}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-rmp-clients}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-86400}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: db-service
+    ports: ["8081:8081"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    networks: [backbone, observability]
+    profiles: [apps]
+
+  ktor-gateway:
+    build:
+      context: ../3-gateway
+      dockerfile: Dockerfile
+    container_name: rmp-gateway
+    depends_on:
+      db-service: { condition: service_healthy }
+    environment:
+      GATEWAY_PORT: "8080"
+      DB_SERVICE_BASE_URL: http://db-service:8081
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-rmp-trading}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-rmp-clients}
+      CORS_ALLOWED_HOSTS: ${CORS_ALLOWED_HOSTS:-http://localhost:19006}
+      RATE_LIMIT_RPS: "200"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: ktor-gateway
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks: [backbone, observability]
+    profiles: [apps]
+
+  # ======================= LOAD TEST (profile: imitator) =======================
+
+  imitator:
+    build:
+      context: ../5-load-imitator
+      dockerfile: Dockerfile
+    container_name: rmp-imitator
+    depends_on:
+      ktor-gateway: { condition: service_healthy }
+    environment:
+      API_BASE_URL: http://ktor-gateway:8080
+      CLIENTS: ${IMITATOR_CLIENTS:-10000}
+      RAMP_UP_SECONDS: ${IMITATOR_RAMP_UP:-120}
+      DURATION_SECONDS: ${IMITATOR_DURATION:-600}
+      THINK_MIN_MS: "500"
+      THINK_MAX_MS: "3000"
+      HTTP_CONCURRENCY: "4096"
+      METRICS_INTERVAL_SECONDS: "5"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: load-imitator
+    networks: [backbone, observability]
+    profiles: [imitator]
