@@ -1,0 +1,49 @@
+# --- Secrets / local env ---
+docker/.env
+*.local
+*.pem
+*.key
+
+# --- Kotlin / Gradle / JVM ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.log
+.kotlin/
+
+# --- Android ---
+1-android-app/local.properties
+1-android-app/.idea/
+1-android-app/app/release/
+*.apk
+*.aab
+*.keystore
+
+# --- Go ---
+6-quotes-receiver/bin/
+*.test
+
+# --- C / kernel module build artefacts ---
+7-linux-driver/*.o
+7-linux-driver/*.ko
+7-linux-driver/*.mod
+7-linux-driver/*.mod.c
+7-linux-driver/*.symvers
+7-linux-driver/*.order
+7-linux-driver/.tmp_versions/
+7-linux-driver/.*.cmd
+
+# --- Node / React Native ---
+2-cross-platform-app/node_modules/
+2-cross-platform-app/.expo/
+2-cross-platform-app/dist/
+
+# --- IDE / OS ---
+.idea/
+*.iml
+.DS_Store
+.vscode/
+
+# --- Data volumes (if ever bind-mounted locally) ---
+docker/_data/
