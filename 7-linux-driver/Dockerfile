@@ -13,6 +13,8 @@ RUN gcc -O2 -Wall -Wextra -static -o quote_gen quote_gen.c
 
 FROM alpine:3.20
 COPY --from=build /src/quote_gen /usr/local/bin/quote_gen
+# Runs as root by design: iteration 1 creates a FIFO on the shared volume, and the
+# step-2 kernel-module path needs root + CAP_MKNOD/SYS_MODULE for insmod/mknod.
 # The FIFO is created on the shared volume mounted at /shared-dev.
 ENV DEVICE_PATH=/shared-dev/financial_quotes
 ENTRYPOINT ["/usr/local/bin/quote_gen"]

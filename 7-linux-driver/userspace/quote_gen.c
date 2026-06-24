@@ -198,6 +198,10 @@ int main(void) {
         log_msg(LVL_ERROR, "mkfifo(%s) failed: %s", path, strerror(errno));
         return 1;
     }
+    /* make the FIFO world-readable regardless of umask so a non-root receiver
+       (6-quotes-receiver runs as uid 10001) can open it for reading */
+    if (chmod(path, 0644) < 0)
+        log_msg(LVL_WARN, "chmod(%s, 0644) failed: %s", path, strerror(errno));
     log_msg(LVL_INFO, "fifo ready at %s | %d instruments | %ld Hz/instrument",
             path, g_inst_count, hz);
 
