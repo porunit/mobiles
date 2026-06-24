@@ -28,7 +28,7 @@ exporters:
   # Logs (and trace archive) -> ClickHouse; tables auto-created
   clickhouse:
     endpoint: tcp://clickhouse:9000?dial_timeout=10s
-    database: analytics
+    database: ${env:CLICKHOUSE_DB}
     username: ${env:CLICKHOUSE_USER}
     password: ${env:CLICKHOUSE_PASSWORD}
     logs_table_name: otel_logs

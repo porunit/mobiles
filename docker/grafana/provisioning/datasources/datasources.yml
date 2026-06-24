@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
@@ -20,6 +21,6 @@ datasources:
       port: 9000
       protocol: native
       username: ${CLICKHOUSE_USER}
-      defaultDatabase: analytics
+      defaultDatabase: ${CLICKHOUSE_DB}
     secureJsonData:
       password: ${CLICKHOUSE_PASSWORD}

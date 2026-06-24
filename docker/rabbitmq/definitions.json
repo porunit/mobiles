@@ -1,6 +1,6 @@
 {
-  "rabbit_version": "3.13.0",
-  "rabbitmq_version": "3.13.0",
+  "rabbit_version": "3.13.7",
+  "rabbitmq_version": "3.13.7",
   "users": [
     {
       "name": "admin",
@@ -20,11 +20,20 @@
   ],
   "permissions": [
     { "user": "admin", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" },
-    { "user": "app",   "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+    { "user": "app",   "vhost": "/", "configure": "", "write": ".*", "read": ".*" }
   ],
   "parameters": [],
   "global_parameters": [],
-  "policies": [],
+  "policies": [
+    {
+      "name": "dlx-bound",
+      "vhost": "/",
+      "pattern": "\\.dlx\\.q$",
+      "apply-to": "queues",
+      "priority": 1,
+      "definition": { "max-length": 50000, "overflow": "drop-head" }
+    }
+  ],
   "exchanges": [
     { "name": "quotes.topic", "vhost": "/", "type": "topic",  "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
     { "name": "orders.topic", "vhost": "/", "type": "topic",  "durable": true, "auto_delete": false, "internal": false, "arguments": {} },

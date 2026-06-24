@@ -29,9 +29,9 @@ services:
   # ======================= INFRASTRUCTURE (default) =======================
 
   rabbitmq:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:3.13.7-management
     container_name: rmp-rabbitmq
-    ports: ["5672:5672", "15672:15672"]
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
@@ -47,7 +47,7 @@ services:
     image: redis:7-alpine
     container_name: rmp-redis
     command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "no"]
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
     volumes: [redis_data:/data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -63,7 +63,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-trading}
       POSTGRES_USER: ${POSTGRES_USER:-trading}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trading_dev_pass}
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trading} -d ${POSTGRES_DB:-trading}"]
@@ -75,7 +75,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     container_name: rmp-clickhouse
-    ports: ["8123:8123", "9000:9000"]
+    ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-analytics}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
@@ -101,11 +101,12 @@ services:
     container_name: rmp-otel-collector
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-analytics}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
     volumes:
       - ./otel/config.yaml:/etc/otelcol/config.yaml:ro
-    ports: ["4317:4317", "4318:4318", "8889:8889"]
+    ports: ["127.0.0.1:4317:4317", "127.0.0.1:4318:4318", "127.0.0.1:8889:8889"]
     depends_on:
       clickhouse: { condition: service_healthy }
       jaeger:     { condition: service_started }
@@ -116,7 +117,7 @@ services:
     container_name: rmp-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    ports: ["16686:16686"]
+    ports: ["127.0.0.1:16686:16686"]
     networks: [observability]
 
   prometheus:
@@ -125,7 +126,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     networks: [backbone, observability]
 
   grafana:
@@ -134,13 +135,14 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASS:-admin}
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-analytics}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-analytics}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-analytics_dev_pass}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     depends_on: [prometheus, jaeger, clickhouse]
     networks: [observability]
 
@@ -190,7 +192,7 @@ services:
       OTEL_SERVICE_NAME: go-receiver
     volumes:
       - dev_financial_quotes:/dev-shared:ro
-    ports: ["8090:8090"]
+    ports: ["127.0.0.1:8090:8090"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
       interval: 10s
@@ -234,7 +236,7 @@ services:
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-86400}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: db-service
-    ports: ["8081:8081"]
+    ports: ["127.0.0.1:8081:8081"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
       interval: 10s
@@ -257,11 +259,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ISSUER: ${JWT_ISSUER:-rmp-trading}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-rmp-clients}
-      CORS_ALLOWED_HOSTS: ${CORS_ALLOWED_HOSTS:-http://localhost:19006}
+      CORS_ALLOWED_HOSTS: ${CORS_ALLOWED_HOSTS:-http://localhost:19006,http://localhost:8081}
       RATE_LIMIT_RPS: "200"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: ktor-gateway
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
