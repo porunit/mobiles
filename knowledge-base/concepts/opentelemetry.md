@@ -7,15 +7,18 @@
 ## В проекте
 - Все сервисы → Collector `:4317` (OTLP gRPC). Конфиг — `docker/otel/config.yaml`.
 - Трейсы → **Jaeger** (UI `:16686`) + архив в ClickHouse.
-- Метрики → **Prometheus** (scrape экспортёра коллектора `:8889`).
+- Метрики → **Prometheus** двумя путями: (1) SDK/JVM-сервисы (db-service, gateway)
+  шлют в Collector, Prometheus скрейпит его экспортёр `:8889`; (2) `go-receiver`
+  отдаёт Prometheus-метрики напрямую на `:8090/metrics` (scrape-job `go-receiver`).
 - Логи → **ClickHouse** (`otel_logs`).
 - Единая панель — **Grafana** (`:3000`) с тремя источниками.
 
 ## Контекст и распространение
 - Заголовок W3C **`traceparent`** связывает спаны через HTTP и AMQP. Spring Java-agent
-  и otel-go SDK подхватывают его автоматически.
-- Трейс начинается на `go-receiver` — модуль ядра (C) не умеет OTLP, его телеметрия —
-  счётчики и `dmesg`.
+  распространяет его полностью автоматически (HTTP/AMQP); в `go-receiver` контекст
+  **вручную** инжектится в AMQP-заголовки (otel-go SDK сам AMQP не инструментирует).
+- Трейс начинается на `go-receiver` — драйвер (C) не эмитит OTLP, его телеметрия —
+  логи и счётчики.
 
 ## Как инструментируем
 - Spring Boot (`db-service`) — Java-agent (авто-спаны JDBC/JPA/AMQP/HTTP) + Micrometer.
