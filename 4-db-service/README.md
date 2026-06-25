@@ -1,6 +1,7 @@
 # 4-db-service — торговое ядро и работа с БД (Spring Boot)
 
-**Итерация 1.** Статус: спроектировано, реализация не начата.
+**Итерация 1.** Статус: **реализован и проверен end-to-end** (auth, котировки,
+портфель, сделки, кошелёк, история).
 
 Ядро системы: аутентификация, инструменты, портфель, сделки, потребление котировок.
 Стек — Spring Boot 3 + Spring Data JPA (`[[adr-0001-backend-stack]]`). Порт `8081`.
@@ -16,7 +17,8 @@
 
 ## Данные
 PostgreSQL: `users, instruments, orders, portfolio_positions`
-(DDL — `src/main/resources/db/migration/V1__core.sql`). Деньги `NUMERIC(20,8)`.
+(схему создаёт Hibernate `ddl-auto=update` в итер. 1; Flyway-миграции — итер. 2).
+Деньги/количество — `NUMERIC(20,8)`, на границе API сериализуются десятичными строками.
 
 ## Безопасность
 JWT HS256 (общий секрет со шлюзом), claims `sub`=userId/`email`/`roles`. Перепроверяет
@@ -25,6 +27,16 @@ JWT HS256 (общий секрет со шлюзом), claims `sub`=userId/`emai
 ## ENV
 `POSTGRES_*`, `REDIS_*`, `RABBITMQ_*`, `RABBITMQ_QUOTES_QUEUE=quotes.consume.q`,
 `CLICKHOUSE_*`, `JWT_SECRET`, `JWT_ACCESS_TTL_SECONDS=86400`, `OTEL_*`.
+
+## Эндпоинты (`/api/v1`)
+`POST /auth/register|login` · `GET /health` · `GET /quotes[/{ticker}]` ·
+`GET /instruments` · `GET /stocks?page=&size=` · `GET /users/me` (JWT) ·
+`GET /portfolio[/positions]` (JWT) · `POST /orders/buy|sell` + `GET /orders` (JWT) ·
+`GET /wallet/balance` + `POST /wallet/deposit|withdraw` (JWT).
+
+## Сборка/запуск
+`docker compose -f docker/docker-compose.yaml up -d --build db-service` (поднимает
+зависимости — Postgres/Redis/RabbitMQ/ClickHouse — автоматически).
 
 ## Обязательные тесты
 Трансформация `QuoteTick→Quote`; сделка без гонок; негативный «DB не выдумывает цены»

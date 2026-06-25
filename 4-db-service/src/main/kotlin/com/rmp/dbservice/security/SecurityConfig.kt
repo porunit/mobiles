@@ -61,6 +61,8 @@ class SecurityConfig(
                 it.requestMatchers("/api/v1/auth/**").permitAll()
                 it.requestMatchers(
                     HttpMethod.GET,
+                    "/api/v1/health",
+                    "/api/v1/quotes",
                     "/api/v1/quotes/**",
                     "/api/v1/instruments",
                     "/api/v1/instruments/**",
