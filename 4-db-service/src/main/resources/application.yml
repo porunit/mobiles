@@ -23,6 +23,12 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:app}
     password: ${RABBITMQ_PASSWORD:app_dev_pass}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 200
+        concurrency: 2
+        max-concurrency: 8
 
 management:
   endpoints:

@@ -117,6 +117,8 @@ services:
     container_name: rmp-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+      # all-in-one keeps traces in memory; cap it so it can't OOM the host (dev).
+      MEMORY_MAX_TRACES: "50000"
     ports: ["127.0.0.1:16686:16686"]
     networks: [observability]
 
@@ -235,6 +237,7 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE:-rmp-clients}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-86400}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: db-service
     ports: ["127.0.0.1:8081:8081"]
     healthcheck:
@@ -262,6 +265,7 @@ services:
       CORS_ALLOWED_HOSTS: ${CORS_ALLOWED_HOSTS:-http://localhost:19006,http://localhost:8081}
       RATE_LIMIT_RPS: "200"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: ktor-gateway
     ports: ["127.0.0.1:8080:8080"]
     healthcheck:
