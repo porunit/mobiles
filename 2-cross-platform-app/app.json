@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "RMP Trading",
+    "slug": "rmp-trading-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0E14"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rmp.trading"
+    },
+    "android": {
+      "package": "com.rmp.trading",
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "apiBaseUrl": null
+    }
+  }
+}
