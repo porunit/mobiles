@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM gradle:8.10-jdk21 AS build
 WORKDIR /home/gradle/src
-COPY --chown=gradle:gradle . .
-RUN gradle --no-daemon bootJar
+# Warm the dependency cache first so source-only changes rebuild fast.
+COPY --chown=gradle:gradle settings.gradle.kts build.gradle.kts ./
+RUN --mount=type=cache,target=/home/gradle/.gradle gradle --no-daemon dependencies --quiet || true
+COPY --chown=gradle:gradle src ./src
+RUN --mount=type=cache,target=/home/gradle/.gradle gradle --no-daemon bootJar
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
