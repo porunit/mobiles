@@ -9,23 +9,26 @@ import org.springframework.amqp.support.AmqpHeaders
 import org.springframework.messaging.handler.annotation.Header
 import org.springframework.stereotype.Component
 
-/** Consumes quotes.consume.q with manual ack — ack after success, dead-letter on failure. */
+/**
+ * Consumes quotes.clickhouse.q (the analytics fan-out queue) with manual ack and
+ * buffers ticks for the batched ClickHouse sink. Separate from quotes.consume.q,
+ * which feeds the Redis last-price cache.
+ */
 @Component
-class QuoteTickListener(
+class ClickHouseQuoteListener(
     private val quoteService: QuoteService,
     private val objectMapper: ObjectMapper,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @RabbitListener(queues = ["\${RABBITMQ_QUOTES_QUEUE:quotes.consume.q}"], ackMode = "MANUAL")
+    @RabbitListener(queues = ["\${RABBITMQ_CLICKHOUSE_QUEUE:quotes.clickhouse.q}"], ackMode = "MANUAL")
     fun onMessage(body: ByteArray, channel: Channel, @Header(AmqpHeaders.DELIVERY_TAG) tag: Long) {
         try {
-            val tick = objectMapper.readValue(body, QuoteTick::class.java)
-            quoteService.cacheLatest(tick)
+            quoteService.archive(objectMapper.readValue(body, QuoteTick::class.java))
             channel.basicAck(tag, false)
         } catch (e: Exception) {
-            log.warn("quote tick processing failed; dead-lettering: {}", e.message)
-            channel.basicNack(tag, false, false) // requeue=false -> DLX dlx.quotes
+            log.warn("clickhouse-queue tick failed; dead-lettering: {}", e.message)
+            channel.basicNack(tag, false, false)
         }
     }
 }

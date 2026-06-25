@@ -21,9 +21,11 @@ class QuoteService(
     meter: MeterRegistry,
 ) {
     private val consumed = meter.counter("dbservice_quotes_consumed_total")
+    private val archived = meter.counter("dbservice_quotes_archived_total")
     private val ttl = Duration.ofSeconds(5)
 
-    fun onTick(tick: QuoteTick) {
+    /** From quotes.consume.q: cache the latest price in Redis for fast reads. */
+    fun cacheLatest(tick: QuoteTick) {
         consumed.increment()
         val last = tick.bid.add(tick.ask).divide(BigDecimal(2), 8, RoundingMode.HALF_UP)
         val snapshot = linkedMapOf(
@@ -35,6 +37,11 @@ class QuoteService(
             "ts" to tick.timestamp,
         )
         redis.opsForValue().set("quote:last:${tick.symbol}", objectMapper.writeValueAsString(snapshot), ttl)
+    }
+
+    /** From quotes.clickhouse.q: buffer the tick for the batched ClickHouse sink. */
+    fun archive(tick: QuoteTick) {
+        archived.increment()
         clickhouse.enqueue(tick)
     }
 }
