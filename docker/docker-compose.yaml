@@ -296,6 +296,7 @@ services:
       HTTP_CONCURRENCY: "4096"
       METRICS_INTERVAL_SECONDS: "5"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: load-imitator
     networks: [backbone, observability]
     profiles: [imitator]
