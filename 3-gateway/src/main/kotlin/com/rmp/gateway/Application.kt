@@ -50,6 +50,10 @@ fun Application.module() {
     val client = HttpClient(CIO) {
         expectSuccess = false
         install(HttpTimeout) { requestTimeoutMillis = 15_000 }
+        // Modest connection ceiling — on a single dev host, opening hundreds of
+        // upstream connections just overwhelms db-service's Tomcat pool. For real
+        // capacity tuning see docs/ARCHITECTURE.md §9 (the 10k methodology).
+        engine { maxConnectionsCount = 256 }
     }
 
     install(ContentNegotiation) { jackson() }

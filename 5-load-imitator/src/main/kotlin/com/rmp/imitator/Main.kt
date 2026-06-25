@@ -21,6 +21,9 @@ private fun ts(): String {
 
 private fun log(msg: String) = println("${ts()} [imitator] $msg")
 
+/** Format a percentile bucket: -1 (overflow) renders as ">5000ms". */
+private fun lat(v: Long): String = if (v < 0) ">5000ms" else "${v}ms"
+
 fun main() = runBlocking {
     val baseUrl = env("API_BASE_URL", "http://localhost:8080")
     val clients = env("CLIENTS", "100").toInt()
@@ -57,11 +60,11 @@ fun main() = runBlocking {
             val err = stats.err.get()
             val rps = (req - lastReq) * 1000.0 / (now - lastT).coerceAtLeast(1)
             log(
-                "t=%3ds active=%5d req=%-9d rps=%-7.0f err=%d(%.2f%%) p50=%dms p95=%dms p99=%dms orders=%d".format(
+                "t=%3ds active=%5d req=%-9d rps=%-7.0f err=%d(%.2f%%) p50=%s p95=%s p99=%s orders=%d".format(
                     (now - startMs) / 1000, active.get(), req, rps, err,
                     if (req > 0) err * 100.0 / req else 0.0,
-                    stats.latency.percentile(0.50), stats.latency.percentile(0.95),
-                    stats.latency.percentile(0.99), stats.orders.get(),
+                    lat(stats.latency.percentile(0.50)), lat(stats.latency.percentile(0.95)),
+                    lat(stats.latency.percentile(0.99)), stats.orders.get(),
                 ),
             )
             lastReq = req
@@ -87,9 +90,9 @@ fun main() = runBlocking {
     val req = stats.req.get()
     val err = stats.err.get()
     log(
-        "DONE total_req=%d errors=%d err_rate=%.2f%% orders=%d p50=%dms p95=%dms p99=%dms".format(
+        "DONE total_req=%d errors=%d err_rate=%.2f%% orders=%d p50=%s p95=%s p99=%s".format(
             req, err, if (req > 0) err * 100.0 / req else 0.0, stats.orders.get(),
-            stats.latency.percentile(0.50), stats.latency.percentile(0.95), stats.latency.percentile(0.99),
+            lat(stats.latency.percentile(0.50)), lat(stats.latency.percentile(0.95)), lat(stats.latency.percentile(0.99)),
         ),
     )
 }

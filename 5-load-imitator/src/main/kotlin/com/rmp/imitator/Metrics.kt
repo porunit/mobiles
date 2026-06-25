@@ -5,15 +5,17 @@ import java.util.concurrent.atomic.AtomicLongArray
 
 /** Lock-free bucketed latency histogram for percentile estimates (ms upper bounds). */
 class LatencyStats {
-    private val bounds = longArrayOf(1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, Long.MAX_VALUE)
-    private val buckets = AtomicLongArray(bounds.size)
+    // Finite ms upper bounds; one extra overflow bucket for ">5000ms".
+    private val bounds = longArrayOf(1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000)
+    private val buckets = AtomicLongArray(bounds.size + 1)
 
     fun record(ms: Long) {
         var i = 0
-        while (i < bounds.size - 1 && ms > bounds[i]) i++
+        while (i < bounds.size && ms > bounds[i]) i++ // i == bounds.size => overflow
         buckets.incrementAndGet(i)
     }
 
+    /** ms upper bound for the requested percentile, or -1 meaning ">5000ms" (overflow). */
     fun percentile(p: Double): Long {
         var total = 0L
         for (i in 0 until buckets.length()) total += buckets.get(i)
@@ -22,9 +24,9 @@ class LatencyStats {
         var cum = 0L
         for (i in 0 until buckets.length()) {
             cum += buckets.get(i)
-            if (cum >= target) return bounds[i]
+            if (cum >= target) return if (i < bounds.size) bounds[i] else -1L
         }
-        return bounds.last()
+        return -1L
     }
 }
 

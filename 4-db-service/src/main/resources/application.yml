@@ -8,6 +8,9 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:trading}
     username: ${POSTGRES_USER:trading}
     password: ${POSTGRES_PASSWORD:trading_dev_pass}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:30}   # raise for load tests (Postgres max_connections=100)
+      minimum-idle: 5
   jpa:
     hibernate:
       ddl-auto: update        # iteration 1 — Flyway migrations come in iteration 2
